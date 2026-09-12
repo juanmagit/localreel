@@ -3,8 +3,9 @@ import { Header } from './components/Header';
 import { MediaCard } from './components/MediaCard';
 import { VideoPlayer } from './components/VideoPlayer';
 import { FolderModal } from './components/FolderModal';
-import { Film, FolderPlus } from 'lucide-react';
-import { MediaFile, LibraryFolder, MediaEventPayload } from './types/media';
+import { NotificationModal } from './components/NotificationModal';
+import { Film, FolderPlus, Sparkles } from 'lucide-react';
+import { MediaFile, LibraryFolder, MediaEventPayload, AppNotification } from './types/media';
 
 export const App: React.FC = () => {
   const [mediaList, setMediaList] = useState<MediaFile[]>([]);
@@ -12,8 +13,29 @@ export const App: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedMedia, setSelectedMedia] = useState<MediaFile | null>(null);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState<boolean>(false);
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState<boolean>(false);
   const [isScanning, setIsScanning] = useState<boolean>(false);
   const [isLoading, setIsLoading] = useState<boolean>(true);
+
+  const [notifications, setNotifications] = useState<AppNotification[]>([]);
+  const [scanProgress, setScanProgress] = useState<{ processed: number; total: number } | null>(null);
+  const [toast, setToast] = useState<AppNotification | null>(null);
+
+  const addNotification = (title: string, message: string, type: AppNotification['type']) => {
+    const newNotif: AppNotification = {
+      id: Date.now().toString() + Math.random().toString().slice(2, 6),
+      title,
+      message,
+      timestamp: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }),
+      type,
+      read: false,
+    };
+    setNotifications((prev) => [newNotif, ...prev]);
+    setToast(newNotif);
+    setTimeout(() => {
+      setToast((current) => (current?.id === newNotif.id ? null : current));
+    }, 4000);
+  };
 
   const fetchMedia = useCallback(async () => {
     try {
@@ -58,8 +80,19 @@ export const App: React.FC = () => {
     eventSource.onmessage = (event) => {
       try {
         const payload: MediaEventPayload = JSON.parse(event.data);
-        if (payload.type === 'MEDIA_UPDATED' && payload.media) {
+
+        if (payload.type === 'SCAN_STARTED' && payload.totalFiles) {
+          setScanProgress({ processed: 0, total: payload.totalFiles });
+          addNotification(
+            'Escaneo iniciado',
+            payload.message || `Procesando ${payload.totalFiles} archivo(s)...`,
+            'info',
+          );
+        } else if (payload.type === 'MEDIA_UPDATED' && payload.media) {
           const updated = payload.media;
+          if (payload.totalFiles && payload.processedCount !== undefined) {
+            setScanProgress({ processed: payload.processedCount, total: payload.totalFiles });
+          }
           setMediaList((prevList) => {
             const exists = prevList.some((item) => item.id === updated.id);
             if (exists) {
@@ -68,8 +101,28 @@ export const App: React.FC = () => {
               return [updated, ...prevList];
             }
           });
+          addNotification(
+            'Miniatura generada',
+            `Lista la portada para "${updated.title}"`,
+            'success',
+          );
+        } else if (payload.type === 'MEDIA_ERROR') {
+          if (payload.totalFiles && payload.processedCount !== undefined) {
+            setScanProgress({ processed: payload.processedCount, total: payload.totalFiles });
+          }
+          addNotification(
+            'Error en miniatura',
+            payload.message || `No se pudo procesar la miniatura para el archivo`,
+            'warning',
+          );
         } else if (payload.type === 'SCAN_COMPLETED') {
+          setScanProgress(null);
           fetchMedia();
+          addNotification(
+            'Escaneo completado',
+            payload.message || 'Se han procesado todas las miniaturas y bibliotecas.',
+            'success',
+          );
         }
       } catch (err) {
         console.error('Error procesando evento SSE:', err);
@@ -100,43 +153,46 @@ export const App: React.FC = () => {
       body: JSON.stringify({ path: pathStr }),
     });
 
-    if (!res.ok) {
-      const errorData = await res.json().catch(() => ({}));
-      throw new Error(errorData.message || 'Error agregando carpeta.');
+    if (res.ok) {
+      await fetchFolders();
+      await handleScanLibrary();
     }
-
-    await fetchFolders();
-    await handleScanLibrary();
   };
 
   const handleRemoveFolder = async (id: string) => {
-    await fetch(`/api/media/folders/${id}`, { method: 'DELETE' });
-    await fetchFolders();
-    await fetchMedia();
+    const res = await fetch(`/api/media/folders/${id}`, {
+      method: 'DELETE',
+    });
+
+    if (res.ok) {
+      await fetchFolders();
+      await handleScanLibrary();
+    }
   };
 
   const handleCleanLibrary = async () => {
-    setIsScanning(true);
     try {
-      await fetch('/api/media/clean', { method: 'POST' });
-      await fetchMedia();
+      const res = await fetch('/api/media/clean', { method: 'POST' });
+      if (res.ok) {
+        const data = await res.json();
+        addNotification(
+          'Limpieza completada',
+          `Se eliminaron ${data.purgedCount || 0} registros huérfanos.`,
+          'info',
+        );
+        await fetchMedia();
+      }
     } catch (err) {
       console.error('Error limpiando biblioteca:', err);
-    } finally {
-      setIsScanning(false);
     }
   };
 
-  const handleSaveProgress = useCallback(async (mediaId: string, stoppedAt: number, duration: number) => {
-    try {
-      await fetch(`/api/media/${mediaId}/progress`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ stoppedAt, duration }),
-      });
-    } catch (err) {
-      console.error('Error guardando progreso:', err);
-    }
+  const handleSaveProgress = useCallback((mediaId: string, stoppedAt: number, duration: number) => {
+    fetch(`/api/media/${mediaId}/progress`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ stoppedAt, duration }),
+    }).catch((err) => console.error('Error guardando progreso:', err));
   }, []);
 
   const handleClosePlayer = () => {
@@ -144,14 +200,27 @@ export const App: React.FC = () => {
     fetchMedia();
   };
 
+  const handleMarkAllNotificationsAsRead = () => {
+    setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
+  };
+
+  const handleClearNotifications = () => {
+    setNotifications([]);
+  };
+
+  const unreadNotificationsCount = notifications.filter((n) => !n.read).length;
+
   return (
-    <div className="min-h-screen flex flex-col bg-brand-dark text-gray-100">
+    <div className="min-h-screen flex flex-col bg-brand-dark font-sans text-gray-100 selection:bg-purple-500 selection:text-white">
       <Header
         searchQuery={searchQuery}
         setSearchQuery={setSearchQuery}
         onOpenFolders={() => setIsFolderModalOpen(true)}
         onScanLibrary={handleScanLibrary}
         isScanning={isScanning}
+        scanProgress={scanProgress}
+        unreadNotificationsCount={unreadNotificationsCount}
+        onOpenNotifications={() => setIsNotificationModalOpen(true)}
       />
 
       <main className="flex-1 px-8 pb-12">
@@ -205,6 +274,25 @@ export const App: React.FC = () => {
         onRemoveFolder={handleRemoveFolder}
         onCleanLibrary={handleCleanLibrary}
       />
+
+      <NotificationModal
+        isOpen={isNotificationModalOpen}
+        onClose={() => setIsNotificationModalOpen(false)}
+        notifications={notifications}
+        onMarkAllAsRead={handleMarkAllNotificationsAsRead}
+        onClearAll={handleClearNotifications}
+      />
+
+      {/* Floating Toast Notification */}
+      {toast && (
+        <div className="fixed bottom-6 right-6 z-50 flex items-start gap-3 p-4 bg-gray-900/95 border border-purple-500/40 rounded-xl shadow-[0_0_20px_rgba(168,85,247,0.25)] text-white max-w-sm backdrop-blur-md animate-fadeIn" id="toast-notification">
+          <Sparkles className="text-pink-400 shrink-0 mt-0.5" size={20} />
+          <div className="flex-1 min-w-0">
+            <h4 className="font-bold text-xs text-purple-300">{toast.title}</h4>
+            <p className="text-xs text-gray-200 mt-0.5 leading-relaxed">{toast.message}</p>
+          </div>
+        </div>
+      )}
 
       {selectedMedia && (
         <VideoPlayer

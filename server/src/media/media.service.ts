@@ -59,31 +59,72 @@ export class MediaService {
     return this.ffmpegAvailable;
   }
 
+  private totalQueueBatchSize = 0;
+  private processedQueueBatchCount = 0;
+
   getMediaEventsObservable(): Observable<MessageEvent> {
     return this.mediaEvents$.asObservable();
   }
 
-  private notifyMediaUpdated(media: SharedMediaFile) {
-    const payload: MediaEventPayload = { type: 'MEDIA_UPDATED', media };
+  private notifyScanStarted(totalFiles: number) {
+    const payload: MediaEventPayload = {
+      type: 'SCAN_STARTED',
+      totalFiles,
+      processedCount: 0,
+      message: `Iniciando escaneo y procesamiento de ${totalFiles} archivo(s)...`,
+    };
     this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
   }
 
-  private notifyScanCompleted() {
-    const payload: MediaEventPayload = { type: 'SCAN_COMPLETED' };
+  private notifyMediaUpdated(media: SharedMediaFile, processedCount: number, totalFiles: number) {
+    const payload: MediaEventPayload = {
+      type: 'MEDIA_UPDATED',
+      media,
+      processedCount,
+      totalFiles,
+      message: `Miniatura generada para "${media.title}" (${processedCount}/${totalFiles})`,
+    };
+    this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+
+  private notifyMediaError(media: MediaFile, errorMessage: string, processedCount: number, totalFiles: number) {
+    const payload: MediaEventPayload = {
+      type: 'MEDIA_ERROR',
+      media: media as unknown as SharedMediaFile,
+      processedCount,
+      totalFiles,
+      message: `No se pudo generar miniatura para "${media.title}": ${errorMessage}`,
+    };
+    this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+
+  private notifyScanCompleted(totalFiles: number) {
+    const payload: MediaEventPayload = {
+      type: 'SCAN_COMPLETED',
+      totalFiles,
+      processedCount: totalFiles,
+      message: `Escaneo y procesado de miniaturas completado (${totalFiles} archivos procesados)`,
+    };
     this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
   }
 
   private enqueueThumbnailProcessing(media: MediaFile) {
     if (!this.thumbnailQueue.some((item) => item.id === media.id)) {
+      if (this.thumbnailQueue.length === 0 && this.activeThumbnailTasks === 0) {
+        this.totalQueueBatchSize = 0;
+        this.processedQueueBatchCount = 0;
+      }
       this.thumbnailQueue.push(media);
+      this.totalQueueBatchSize++;
+      this.notifyScanStarted(this.totalQueueBatchSize);
     }
     this.processQueue();
   }
 
   private async processQueue() {
     if (this.activeThumbnailTasks >= this.MAX_CONCURRENT_THUMBNAILS || this.thumbnailQueue.length === 0) {
-      if (this.activeThumbnailTasks === 0 && this.thumbnailQueue.length === 0) {
-        this.notifyScanCompleted();
+      if (this.activeThumbnailTasks === 0 && this.thumbnailQueue.length === 0 && this.totalQueueBatchSize > 0) {
+        this.notifyScanCompleted(this.totalQueueBatchSize);
       }
       return;
     }
@@ -95,12 +136,19 @@ export class MediaService {
     try {
       await this.processMetadataAndThumbnail(media);
       const fullMedia = await this.findOne(media.id);
-      this.notifyMediaUpdated(fullMedia as unknown as SharedMediaFile);
+      this.processedQueueBatchCount++;
+      this.notifyMediaUpdated(fullMedia as unknown as SharedMediaFile, this.processedQueueBatchCount, this.totalQueueBatchSize);
     } catch (err) {
+      this.processedQueueBatchCount++;
       this.logger.error(`Error procesando miniatura en cola para ${media.filePath}: ${err.message}`);
+      this.notifyMediaError(media, err.message || 'Error de procesamiento', this.processedQueueBatchCount, this.totalQueueBatchSize);
     } finally {
       this.activeThumbnailTasks--;
-      this.processQueue();
+      if (this.activeThumbnailTasks === 0 && this.thumbnailQueue.length === 0) {
+        this.notifyScanCompleted(this.totalQueueBatchSize);
+      } else {
+        this.processQueue();
+      }
     }
   }
 
@@ -277,7 +325,7 @@ export class MediaService {
   private async processMetadataAndThumbnail(media: MediaFile): Promise<void> {
     if (!this.ffmpegAvailable) return;
 
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       execFile(
         'ffprobe',
         [
@@ -289,7 +337,7 @@ export class MediaService {
         ],
         (err, stdout) => {
           if (err || !stdout) {
-            resolve();
+            reject(new Error(err?.message || 'ffprobe no pudo analizar el formato del archivo'));
             return;
           }
 
@@ -325,16 +373,18 @@ export class MediaService {
               async (thumbErr) => {
                 if (thumbErr) {
                   this.logger.error(`Error generando miniatura con FFmpeg para ${media.filePath}: ${thumbErr.message}`);
+                  reject(new Error(`ffmpeg falló: ${thumbErr.message}`));
+                  return;
                 }
-                if (!thumbErr && fs.existsSync(thumbnailPath)) {
+                if (fs.existsSync(thumbnailPath)) {
                   media.thumbnailPath = this.getThumbnailUrl(media.id);
                 }
                 await this.mediaRepository.save(media);
                 resolve();
               },
             );
-          } catch {
-            this.mediaRepository.save(media).then(() => resolve());
+          } catch (parseErr) {
+            reject(new Error(parseErr?.message || 'Error al decodificar la salida de metadatos'));
           }
         },
       );

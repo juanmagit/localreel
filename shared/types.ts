@@ -34,9 +34,21 @@ export interface LibraryFolder {
   createdAt?: string | Date;
 }
 
-export type MediaEventType = 'MEDIA_UPDATED' | 'SCAN_COMPLETED';
+export type MediaEventType = 'SCAN_STARTED' | 'MEDIA_UPDATED' | 'MEDIA_ERROR' | 'SCAN_COMPLETED';
 
 export interface MediaEventPayload {
   type: MediaEventType;
   media?: MediaFile;
+  processedCount?: number;
+  totalFiles?: number;
+  message?: string;
+}
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  timestamp: string;
+  type: 'info' | 'success' | 'warning';
+  read: boolean;
 }
