@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.DS_Store
+*.log
+*.tsbuildinfo
+localreel.sqlite
+data/
+uploads/
+thumbnails/
+.env
+shared/*.js
+shared/*.d.ts
+shared/*.js.map
