@@ -33,3 +33,10 @@ export interface LibraryFolder {
   label?: string;
   createdAt?: string | Date;
 }
+
+export type MediaEventType = 'MEDIA_UPDATED' | 'SCAN_COMPLETED';
+
+export interface MediaEventPayload {
+  type: MediaEventType;
+  media?: MediaFile;
+}

@@ -4,7 +4,7 @@ import { MediaCard } from './components/MediaCard';
 import { VideoPlayer } from './components/VideoPlayer';
 import { FolderModal } from './components/FolderModal';
 import { Film, FolderPlus } from 'lucide-react';
-import { MediaFile, LibraryFolder } from './types/media';
+import { MediaFile, LibraryFolder, MediaEventPayload } from './types/media';
 
 export const App: React.FC = () => {
   const [mediaList, setMediaList] = useState<MediaFile[]>([]);
@@ -50,6 +50,35 @@ export const App: React.FC = () => {
       fetchMedia();
     }, 300);
     return () => clearTimeout(timer);
+  }, [fetchMedia]);
+
+  useEffect(() => {
+    const eventSource = new EventSource('/api/media/events');
+
+    eventSource.onmessage = (event) => {
+      try {
+        const payload: MediaEventPayload = JSON.parse(event.data);
+        if (payload.type === 'MEDIA_UPDATED' && payload.media) {
+          const updated = payload.media;
+          setMediaList((prevList) => {
+            const exists = prevList.some((item) => item.id === updated.id);
+            if (exists) {
+              return prevList.map((item) => (item.id === updated.id ? updated : item));
+            } else {
+              return [updated, ...prevList];
+            }
+          });
+        } else if (payload.type === 'SCAN_COMPLETED') {
+          fetchMedia();
+        }
+      } catch (err) {
+        console.error('Error procesando evento SSE:', err);
+      }
+    };
+
+    return () => {
+      eventSource.close();
+    };
   }, [fetchMedia]);
 
   const handleScanLibrary = async () => {

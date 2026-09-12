@@ -1,13 +1,14 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, MessageEvent } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository, Like } from 'typeorm';
+import { Subject, Observable } from 'rxjs';
 import { MediaFile } from './entities/media-file.entity';
 import { WatchProgress } from './entities/watch-progress.entity';
 import { LibraryFolder } from './entities/library-folder.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync, execFile } from 'child_process';
-import { MediaFile as SharedMediaFile } from '@shared/types';
+import { MediaFile as SharedMediaFile, MediaEventPayload } from '@shared/types';
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.flv', '.wmv']);
 
@@ -19,6 +20,11 @@ export class MediaService {
   private readonly logger = new Logger(MediaService.name);
   private readonly thumbnailsDir = path.join(process.cwd(), 'public', THUMBNAILS_FOLDER_NAME);
   private ffmpegAvailable = false;
+
+  private readonly mediaEvents$ = new Subject<MessageEvent>();
+  private readonly thumbnailQueue: MediaFile[] = [];
+  private activeThumbnailTasks = 0;
+  private readonly MAX_CONCURRENT_THUMBNAILS = 2;
 
   constructor(
     @InjectRepository(MediaFile)
@@ -51,6 +57,51 @@ export class MediaService {
 
   isFfmpegAvailable(): boolean {
     return this.ffmpegAvailable;
+  }
+
+  getMediaEventsObservable(): Observable<MessageEvent> {
+    return this.mediaEvents$.asObservable();
+  }
+
+  private notifyMediaUpdated(media: SharedMediaFile) {
+    const payload: MediaEventPayload = { type: 'MEDIA_UPDATED', media };
+    this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+
+  private notifyScanCompleted() {
+    const payload: MediaEventPayload = { type: 'SCAN_COMPLETED' };
+    this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+
+  private enqueueThumbnailProcessing(media: MediaFile) {
+    if (!this.thumbnailQueue.some((item) => item.id === media.id)) {
+      this.thumbnailQueue.push(media);
+    }
+    this.processQueue();
+  }
+
+  private async processQueue() {
+    if (this.activeThumbnailTasks >= this.MAX_CONCURRENT_THUMBNAILS || this.thumbnailQueue.length === 0) {
+      if (this.activeThumbnailTasks === 0 && this.thumbnailQueue.length === 0) {
+        this.notifyScanCompleted();
+      }
+      return;
+    }
+
+    const media = this.thumbnailQueue.shift();
+    if (!media) return;
+
+    this.activeThumbnailTasks++;
+    try {
+      await this.processMetadataAndThumbnail(media);
+      const fullMedia = await this.findOne(media.id);
+      this.notifyMediaUpdated(fullMedia as unknown as SharedMediaFile);
+    } catch (err) {
+      this.logger.error(`Error procesando miniatura en cola para ${media.filePath}: ${err.message}`);
+    } finally {
+      this.activeThumbnailTasks--;
+      this.processQueue();
+    }
   }
 
   private getThumbnailFilename(mediaIdOrUrl: string): string {
@@ -212,10 +263,11 @@ export class MediaService {
         await this.mediaRepository.save(media);
         newCount++;
 
-        // Extract ffprobe metadata & generate thumbnail asynchronously
-        this.processMetadataAndThumbnail(media).catch((err) => {
-          this.logger.error(`Error procesando metadatos para ${filePath}: ${err.message}`);
-        });
+        // Enqueue for background thumbnail & metadata processing
+        this.enqueueThumbnailProcessing(media);
+      } else if (!media.thumbnailPath || !fs.existsSync(this.getThumbnailAbsolutePath(media.id))) {
+        // Enqueue missing thumbnail for existing files
+        this.enqueueThumbnailProcessing(media);
       }
     }
 

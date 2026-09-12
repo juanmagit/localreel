@@ -1,9 +1,15 @@
-import { Controller, Get, Post, Delete, Body, Param, Query } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, Sse, MessageEvent } from '@nestjs/common';
+import { Observable } from 'rxjs';
 import { MediaService } from './media.service';
 
 @Controller('api/media')
 export class MediaController {
   constructor(private readonly mediaService: MediaService) {}
+
+  @Sse('events')
+  sendEvents(): Observable<MessageEvent> {
+    return this.mediaService.getMediaEventsObservable();
+  }
 
   @Get()
   async getMedia(@Query('q') query?: string) {
