@@ -51,6 +51,12 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose, onProg
     };
   }, [isPlaying]);
 
+  const initialSeekDoneRef = useRef<boolean>(false);
+
+  const isNativeFormat = ['.mp4', '.webm'].includes(media.format?.toLowerCase() || '');
+  const isNativeCodec = ['h264', 'vp8', 'vp9', 'av1'].includes(media.videoCodec?.toLowerCase() || '');
+  const isDirectStream = preset === 'direct' && isNativeFormat && isNativeCodec;
+
   const seekOffsetRef = useRef(seekOffset);
   seekOffsetRef.current = seekOffset;
 
@@ -62,15 +68,23 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose, onProg
 
   useEffect(() => {
     const initial = media.progress?.stoppedAt || 0;
-    setSeekOffset(initial);
-    setCurrentTime(initial);
-    setStreamUrl(`/api/stream/${media.id}?preset=${preset}&startTime=${initial}`);
-  }, [media.id, preset]);
+    initialSeekDoneRef.current = false;
+
+    if (isDirectStream) {
+      setSeekOffset(0);
+      setCurrentTime(initial);
+      setStreamUrl(`/api/stream/${media.id}?preset=direct`);
+    } else {
+      setSeekOffset(initial);
+      setCurrentTime(initial);
+      setStreamUrl(`/api/stream/${media.id}?preset=${preset}&startTime=${initial}`);
+    }
+  }, [media.id, preset, isDirectStream]);
 
   useEffect(() => {
     const interval = setInterval(() => {
       if (videoRef.current && !videoRef.current.paused) {
-        const time = seekOffsetRef.current + videoRef.current.currentTime;
+        const time = isDirectStream ? videoRef.current.currentTime : (seekOffsetRef.current + videoRef.current.currentTime);
         const dur = durationRef.current || media.duration || 0;
         if (time >= 0) {
           onProgressUpdateRef.current(media.id, time, dur);
@@ -81,14 +95,14 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose, onProg
     return () => {
       clearInterval(interval);
       if (videoRef.current) {
-        const time = seekOffsetRef.current + videoRef.current.currentTime;
+        const time = isDirectStream ? videoRef.current.currentTime : (seekOffsetRef.current + videoRef.current.currentTime);
         const dur = durationRef.current || media.duration || 0;
         if (time >= 0) {
           onProgressUpdateRef.current(media.id, time, dur);
         }
       }
     };
-  }, [media.id, media.duration]);
+  }, [media.id, media.duration, isDirectStream]);
 
   const togglePlay = () => {
     if (!videoRef.current) return;
@@ -101,23 +115,57 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose, onProg
     }
   };
 
+  const handleLoadedMetadata = () => {
+    if (videoRef.current && isDirectStream && !initialSeekDoneRef.current) {
+      const initial = media.progress?.stoppedAt || 0;
+      if (initial > 0) {
+        videoRef.current.currentTime = initial;
+      }
+      initialSeekDoneRef.current = true;
+    }
+  };
+
+  const handleCanPlay = () => {
+    if (videoRef.current && isPlaying) {
+      videoRef.current.play().catch(() => {});
+    }
+  };
+
   const handleTimeUpdate = () => {
     if (videoRef.current) {
-      const realTime = seekOffset + videoRef.current.currentTime;
+      const realTime = isDirectStream ? videoRef.current.currentTime : (seekOffset + videoRef.current.currentTime);
       setCurrentTime(realTime);
       if (media.duration && media.duration > 0) {
         setDuration(media.duration);
       } else if (videoRef.current.duration && !isNaN(videoRef.current.duration)) {
-        setDuration(seekOffset + videoRef.current.duration);
+        setDuration(isDirectStream ? videoRef.current.duration : (seekOffset + videoRef.current.duration));
       }
     }
   };
 
   const performSeek = (targetSecond: number) => {
     const validSeek = Math.max(0, Math.min(targetSecond, duration || media.duration || 100));
-    setSeekOffset(validSeek);
-    setCurrentTime(validSeek);
-    setStreamUrl(`/api/stream/${media.id}?preset=${preset}&startTime=${validSeek}`);
+
+    if (isDirectStream) {
+      if (videoRef.current) {
+        videoRef.current.currentTime = validSeek;
+        videoRef.current.play().catch(() => {});
+      }
+      setCurrentTime(validSeek);
+    } else {
+      const newUrl = `/api/stream/${media.id}?preset=${preset}&startTime=${validSeek}`;
+      setSeekOffset(validSeek);
+      setCurrentTime(validSeek);
+
+      if (streamUrl === newUrl) {
+        if (videoRef.current) {
+          videoRef.current.currentTime = 0;
+          videoRef.current.play().catch(() => {});
+        }
+      } else {
+        setStreamUrl(newUrl);
+      }
+    }
     setIsPlaying(true);
   };
 
@@ -197,6 +245,8 @@ export const VideoPlayer: React.FC<VideoPlayerProps> = ({ media, onClose, onProg
           src={streamUrl}
           className={`w-full h-full object-contain ${!showControls && isPlaying ? 'cursor-none' : 'cursor-pointer'}`}
           autoPlay
+          onLoadedMetadata={handleLoadedMetadata}
+          onCanPlay={handleCanPlay}
           onTimeUpdate={handleTimeUpdate}
           onEnded={() => setIsPlaying(false)}
           onClick={togglePlay}

@@ -91,7 +91,7 @@ export class StreamService {
 
     // Fast input seeking before -i
     if (startTime > 0) {
-      ffmpegArgs.push('-ss', startTime.toString());
+      ffmpegArgs.push('-ss', startTime.toFixed(2));
     }
 
     ffmpegArgs.push('-i', filePath);
@@ -120,6 +120,8 @@ export class StreamService {
       '-c:v', 'libx264',
       '-preset', 'ultrafast',
       '-tune', 'zerolatency',
+      '-avoid_negative_ts', 'make_zero',
+      '-max_muxing_queue_size', '1024',
       '-g', '25',
       '-keyint_min', '25',
       '-sc_threshold', '0',
