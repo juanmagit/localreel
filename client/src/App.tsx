@@ -4,10 +4,28 @@ import { MediaCard } from './components/MediaCard';
 import { VideoPlayer } from './components/VideoPlayer';
 import { FolderModal } from './components/FolderModal';
 import { NotificationModal } from './components/NotificationModal';
+import { UserSelectModal } from './components/UserSelectModal';
+import { UserManagementModal } from './components/UserManagementModal';
 import { Film, FolderPlus, Sparkles } from 'lucide-react';
-import { MediaFile, LibraryFolder, MediaEventPayload, AppNotification } from './types/media';
+import {
+  MediaFile,
+  LibraryFolder,
+  MediaEventPayload,
+  AppNotification,
+  User,
+  CURRENT_USER_STORAGE_KEY,
+} from './types/media';
+import { getAuthHeaders } from './utils/api';
 
 export const App: React.FC = () => {
+  const [currentUser, setCurrentUser] = useState<User | null>(() => {
+    const saved = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
+    return saved ? JSON.parse(saved) : null;
+  });
+
+  const [isUserSelectModalOpen, setIsUserSelectModalOpen] = useState<boolean>(false);
+  const [isUserManagementModalOpen, setIsUserManagementModalOpen] = useState<boolean>(false);
+
   const [mediaList, setMediaList] = useState<MediaFile[]>([]);
   const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
@@ -20,6 +38,39 @@ export const App: React.FC = () => {
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [scanProgress, setScanProgress] = useState<{ processed: number; total: number } | null>(null);
   const [toast, setToast] = useState<AppNotification | null>(null);
+
+  // Auto Login in Dev Mode (VITE_DEV_AUTO_LOGIN=true)
+  useEffect(() => {
+    const isDevAutoLogin = import.meta.env.VITE_DEV_AUTO_LOGIN === 'true';
+    if (!currentUser) {
+      if (isDevAutoLogin) {
+        fetch('/api/users')
+          .then((res) => (res.ok ? res.json() : []))
+          .then((users: User[]) => {
+            const admin = users.find((u) => u.role === 'admin') || users[0];
+            if (admin) {
+              setCurrentUser(admin);
+              localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(admin));
+            } else {
+              setIsUserSelectModalOpen(true);
+            }
+          })
+          .catch(() => setIsUserSelectModalOpen(true));
+      } else {
+        setIsUserSelectModalOpen(true);
+      }
+    }
+  }, [currentUser]);
+
+  const handleSelectUser = (user: User) => {
+    setCurrentUser(user);
+    localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
+    setIsUserSelectModalOpen(false);
+  };
+
+  const handleSwitchUser = () => {
+    setIsUserSelectModalOpen(true);
+  };
 
   const addNotification = (title: string, message: string, type: AppNotification['type']) => {
     const newNotif: AppNotification = {
@@ -38,8 +89,11 @@ export const App: React.FC = () => {
   };
 
   const fetchMedia = useCallback(async () => {
+    if (!currentUser) return;
     try {
-      const res = await fetch(`/api/media?q=${encodeURIComponent(searchQuery)}`);
+      const res = await fetch(`/api/media?q=${encodeURIComponent(searchQuery)}`, {
+        headers: getAuthHeaders(currentUser),
+      });
       if (res.ok) {
         const data = await res.json();
         setMediaList(data);
@@ -49,11 +103,14 @@ export const App: React.FC = () => {
     } finally {
       setIsLoading(false);
     }
-  }, [searchQuery]);
+  }, [searchQuery, currentUser]);
 
   const fetchFolders = useCallback(async () => {
+    if (!currentUser) return;
     try {
-      const res = await fetch('/api/media/folders');
+      const res = await fetch('/api/media/folders', {
+        headers: getAuthHeaders(currentUser),
+      });
       if (res.ok) {
         const data = await res.json();
         setFolders(data);
@@ -61,18 +118,22 @@ export const App: React.FC = () => {
     } catch (err) {
       console.error('Error cargando carpetas:', err);
     }
-  }, []);
+  }, [currentUser]);
 
   useEffect(() => {
-    fetchFolders();
-  }, [fetchFolders]);
+    if (currentUser) {
+      fetchFolders();
+    }
+  }, [fetchFolders, currentUser]);
 
   useEffect(() => {
-    const timer = setTimeout(() => {
-      fetchMedia();
-    }, 300);
-    return () => clearTimeout(timer);
-  }, [fetchMedia]);
+    if (currentUser) {
+      const timer = setTimeout(() => {
+        fetchMedia();
+      }, 300);
+      return () => clearTimeout(timer);
+    }
+  }, [fetchMedia, currentUser]);
 
   useEffect(() => {
     const eventSource = new EventSource('/api/media/events');
@@ -135,9 +196,13 @@ export const App: React.FC = () => {
   }, [fetchMedia]);
 
   const handleScanLibrary = async () => {
+    if (!currentUser) return;
     setIsScanning(true);
     try {
-      await fetch('/api/media/scan', { method: 'POST' });
+      await fetch('/api/media/scan', {
+        method: 'POST',
+        headers: getAuthHeaders(currentUser),
+      });
       await fetchMedia();
     } catch (err) {
       console.error('Error al escanear biblioteca:', err);
@@ -147,9 +212,13 @@ export const App: React.FC = () => {
   };
 
   const handleAddFolder = async (pathStr: string) => {
+    if (!currentUser) return;
     const res = await fetch('/api/media/folders', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: {
+        'Content-Type': 'application/json',
+        ...getAuthHeaders(currentUser),
+      },
       body: JSON.stringify({ path: pathStr }),
     });
 
@@ -160,8 +229,10 @@ export const App: React.FC = () => {
   };
 
   const handleRemoveFolder = async (id: string) => {
+    if (!currentUser) return;
     const res = await fetch(`/api/media/folders/${id}`, {
       method: 'DELETE',
+      headers: getAuthHeaders(currentUser),
     });
 
     if (res.ok) {
@@ -171,8 +242,12 @@ export const App: React.FC = () => {
   };
 
   const handleCleanLibrary = async () => {
+    if (!currentUser) return;
     try {
-      const res = await fetch('/api/media/clean', { method: 'POST' });
+      const res = await fetch('/api/media/clean', {
+        method: 'POST',
+        headers: getAuthHeaders(currentUser),
+      });
       if (res.ok) {
         const data = await res.json();
         addNotification(
@@ -187,13 +262,20 @@ export const App: React.FC = () => {
     }
   };
 
-  const handleSaveProgress = useCallback((mediaId: string, stoppedAt: number, duration: number) => {
-    fetch(`/api/media/${mediaId}/progress`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ stoppedAt, duration }),
-    }).catch((err) => console.error('Error guardando progreso:', err));
-  }, []);
+  const handleSaveProgress = useCallback(
+    (mediaId: string, stoppedAt: number, duration: number) => {
+      if (!currentUser) return;
+      fetch(`/api/media/${mediaId}/progress`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          ...getAuthHeaders(currentUser),
+        },
+        body: JSON.stringify({ stoppedAt, duration }),
+      }).catch((err) => console.error('Error guardando progreso:', err));
+    },
+    [currentUser],
+  );
 
   const handleClosePlayer = () => {
     setSelectedMedia(null);
@@ -221,6 +303,9 @@ export const App: React.FC = () => {
         scanProgress={scanProgress}
         unreadNotificationsCount={unreadNotificationsCount}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
+        currentUser={currentUser}
+        onSwitchUser={handleSwitchUser}
+        onOpenUserManagement={() => setIsUserManagementModalOpen(true)}
       />
 
       <main className="flex-1 px-8 pb-12">
@@ -243,14 +328,16 @@ export const App: React.FC = () => {
                   ? 'Añade una carpeta de tu disco duro para escanearla y reproducir tus películas en la red local.'
                   : 'No se han detectado archivos de vídeo (.mp4, .mkv, .avi, .mov) en tus carpetas configuradas.'}
               </p>
-              <button
-                className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 transition-all mt-2"
-                onClick={() => setIsFolderModalOpen(true)}
-                id="btn-empty-add-folder"
-              >
-                <FolderPlus size={18} />
-                <span>Configurar Directorios</span>
-              </button>
+              {currentUser?.role === 'admin' && (
+                <button
+                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 transition-all mt-2"
+                  onClick={() => setIsFolderModalOpen(true)}
+                  id="btn-empty-add-folder"
+                >
+                  <FolderPlus size={18} />
+                  <span>Configurar Directorios</span>
+                </button>
+              )}
             </div>
           ) : (
             <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-6">
@@ -265,6 +352,32 @@ export const App: React.FC = () => {
           )}
         </div>
       </main>
+
+      <UserSelectModal
+        isOpen={isUserSelectModalOpen}
+        onSelectUser={handleSelectUser}
+      />
+
+      <UserManagementModal
+        isOpen={isUserManagementModalOpen}
+        onClose={() => setIsUserManagementModalOpen(false)}
+        currentUser={currentUser}
+        onUsersChanged={() => {
+          fetchMedia();
+          if (currentUser) {
+            fetch('/api/users')
+              .then((res) => (res.ok ? res.json() : []))
+              .then((usersList: User[]) => {
+                const updated = usersList.find((u) => u.id === currentUser.id);
+                if (updated) {
+                  setCurrentUser(updated);
+                  localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(updated));
+                }
+              })
+              .catch(() => {});
+          }
+        }}
+      />
 
       <FolderModal
         isOpen={isFolderModalOpen}

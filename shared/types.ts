@@ -1,8 +1,48 @@
 export type TranscodePreset = 'direct' | '1080p' | '720p' | '480p' | '360p';
 
+export const USER_ID_HEADER = 'x-user-id';
+export const CURRENT_USER_STORAGE_KEY = 'localreel_current_user';
+
+export type UserRole = 'admin' | 'user';
+
+export interface User {
+  id: string;
+  name: string;
+  role: UserRole;
+  avatarColor: string;
+  hasPin: boolean;
+  createdAt?: string | Date;
+}
+
+export interface CreateUserDto {
+  name: string;
+  role: UserRole;
+  pin?: string;
+  avatarColor?: string;
+}
+
+export interface UpdateUserDto {
+  name?: string;
+  role?: UserRole;
+  pin?: string;
+  avatarColor?: string;
+}
+
+export interface LoginDto {
+  userId: string;
+  pin?: string;
+}
+
+export interface LoginResponse {
+  success: boolean;
+  user?: User;
+  message?: string;
+}
+
 export interface WatchProgress {
   id?: number;
   mediaId: string;
+  userId: string;
   stoppedAt: number;
   duration: number;
   isCompleted: boolean;

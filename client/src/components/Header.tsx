@@ -1,5 +1,6 @@
-import React from 'react';
-import { Film, Search, FolderPlus, RefreshCw, Bell, Loader2 } from 'lucide-react';
+import React, { useState, useRef, useEffect } from 'react';
+import { Film, Search, FolderPlus, RefreshCw, Bell, Loader2, Shield, User as UserIcon, LogOut, Users } from 'lucide-react';
+import { User } from '../types/media';
 
 interface HeaderProps {
   searchQuery: string;
@@ -10,6 +11,9 @@ interface HeaderProps {
   scanProgress?: { processed: number; total: number } | null;
   unreadNotificationsCount: number;
   onOpenNotifications: () => void;
+  currentUser: User | null;
+  onSwitchUser: () => void;
+  onOpenUserManagement: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -21,11 +25,29 @@ export const Header: React.FC<HeaderProps> = ({
   scanProgress,
   unreadNotificationsCount,
   onOpenNotifications,
+  currentUser,
+  onSwitchUser,
+  onOpenUserManagement,
 }) => {
+  const [isUserMenuOpen, setIsUserMenuOpen] = useState<boolean>(false);
+  const userMenuRef = useRef<HTMLDivElement | null>(null);
+
   const isBatchProcessing = scanProgress && scanProgress.total > 0;
   const progressPercent = isBatchProcessing
     ? Math.round((scanProgress.processed / scanProgress.total) * 100)
     : 0;
+
+  useEffect(() => {
+    const handleClickOutside = (e: MouseEvent) => {
+      if (userMenuRef.current && !userMenuRef.current.contains(e.target as Node)) {
+        setIsUserMenuOpen(false);
+      }
+    };
+    document.addEventListener('mousedown', handleClickOutside);
+    return () => document.removeEventListener('mousedown', handleClickOutside);
+  }, []);
+
+  const isAdmin = currentUser?.role === 'admin';
 
   return (
     <header className="sticky top-0 z-50 flex items-center justify-between px-8 py-4 bg-brand-dark/85 backdrop-blur-md border-b border-white/10">
@@ -76,24 +98,84 @@ export const Header: React.FC<HeaderProps> = ({
           )}
         </button>
 
-        <button
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-white/10 hover:bg-white/20 text-gray-100 border border-white/10 transition-all duration-200"
-          onClick={onOpenFolders}
-          id="btn-manage-folders"
-        >
-          <FolderPlus size={18} />
-          <span>Directorios</span>
-        </button>
+        {/* Admin Folder Management (only for admins) */}
+        {isAdmin && (
+          <button
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-white/10 hover:bg-white/20 text-gray-100 border border-white/10 transition-all duration-200"
+            onClick={onOpenFolders}
+            id="btn-manage-folders"
+          >
+            <FolderPlus size={18} />
+            <span>Directorios</span>
+          </button>
+        )}
 
-        <button
-          className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50"
-          onClick={onScanLibrary}
-          disabled={isScanning}
-          id="btn-scan-library"
-        >
-          <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} />
-          <span>{isScanning ? 'Escaneando...' : 'Reescanear'}</span>
-        </button>
+        {/* Scan Library Button */}
+        {isAdmin && (
+          <button
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50"
+            onClick={onScanLibrary}
+            disabled={isScanning}
+            id="btn-scan-library"
+          >
+            <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} />
+            <span>{isScanning ? 'Escaneando...' : 'Reescanear'}</span>
+          </button>
+        )}
+
+        {/* User Profile Badge & Menu */}
+        {currentUser && (
+          <div className="relative" ref={userMenuRef}>
+            <button
+              onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
+              className="flex items-center gap-2.5 p-1.5 pl-3 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition-all duration-200"
+              id="btn-user-profile-menu"
+            >
+              <div className="flex flex-col items-end text-right leading-tight">
+                <span className="text-xs font-semibold text-white truncate max-w-[100px]">{currentUser.name}</span>
+                <span className="text-[10px] text-gray-400 capitalize flex items-center gap-0.5">
+                  {isAdmin && <Shield size={10} className="text-amber-400 fill-amber-400/20" />}
+                  {isAdmin ? 'Admin' : 'Usuario'}
+                </span>
+              </div>
+              <div
+                className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white text-xs shadow-md"
+                style={{ backgroundColor: currentUser.avatarColor || '#8B5CF6' }}
+              >
+                {currentUser.name.slice(0, 2).toUpperCase()}
+              </div>
+            </button>
+
+            {/* Dropdown Menu */}
+            {isUserMenuOpen && (
+              <div className="absolute right-0 mt-2 w-52 bg-gray-900/95 border border-white/10 rounded-xl shadow-2xl backdrop-blur-md py-1.5 z-50 animate-fade-in">
+                {isAdmin && (
+                  <button
+                    onClick={() => {
+                      setIsUserMenuOpen(false);
+                      onOpenUserManagement();
+                    }}
+                    className="w-full text-left px-4 py-2.5 text-xs text-gray-200 hover:bg-purple-600/20 hover:text-purple-300 flex items-center gap-2.5 transition-colors"
+                  >
+                    <Users size={16} className="text-purple-400" />
+                    <span>Gestionar usuarios</span>
+                  </button>
+                )}
+
+                <button
+                  onClick={() => {
+                    setIsUserMenuOpen(false);
+                    onSwitchUser();
+                  }}
+                  className="w-full text-left px-4 py-2.5 text-xs text-gray-200 hover:bg-white/10 hover:text-white flex items-center gap-2.5 transition-colors border-t border-white/5"
+                >
+                  <LogOut size={16} className="text-pink-400" />
+                  <span>Cambiar de usuario</span>
+                </button>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </header>
   );

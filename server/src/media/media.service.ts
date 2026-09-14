@@ -1,6 +1,6 @@
-import { Injectable, Logger, NotFoundException, MessageEvent } from '@nestjs/common';
+import { Injectable, Logger, NotFoundException, MessageEvent, OnModuleInit } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
-import { Repository, Like } from 'typeorm';
+import { Repository } from 'typeorm';
 import { Subject, Observable } from 'rxjs';
 import { MediaFile } from './entities/media-file.entity';
 import { WatchProgress } from './entities/watch-progress.entity';
@@ -199,11 +199,20 @@ export class MediaService {
     }
   }
 
-  async findAll(query?: string): Promise<SharedMediaFile[]> {
+  async findAll(query?: string, userId?: string): Promise<SharedMediaFile[]> {
     const qb = this.mediaRepository
       .createQueryBuilder('media')
-      .leftJoinAndMapOne('media.progress', WatchProgress, 'progress', 'progress.mediaId = media.id')
       .orderBy('media.title', 'ASC');
+
+    if (userId) {
+      qb.leftJoinAndMapOne(
+        'media.progress',
+        WatchProgress,
+        'progress',
+        'progress.mediaId = media.id AND progress.userId = :userId',
+        { userId },
+      );
+    }
 
     if (query && query.trim() !== '') {
       qb.where('media.title LIKE :query', { query: `%${query.trim()}%` });
@@ -212,8 +221,22 @@ export class MediaService {
     return (await qb.getMany()) as unknown as SharedMediaFile[];
   }
 
-  async findOne(id: string): Promise<MediaFile> {
-    const media = await this.mediaRepository.findOne({ where: { id } });
+  async findOne(id: string, userId?: string): Promise<MediaFile> {
+    const qb = this.mediaRepository
+      .createQueryBuilder('media')
+      .where('media.id = :id', { id });
+
+    if (userId) {
+      qb.leftJoinAndMapOne(
+        'media.progress',
+        WatchProgress,
+        'progress',
+        'progress.mediaId = media.id AND progress.userId = :userId',
+        { userId },
+      );
+    }
+
+    const media = await qb.getOne();
     if (!media) {
       throw new NotFoundException(`Película o vídeo con ID "${id}" no encontrado.`);
     }
@@ -391,13 +414,14 @@ export class MediaService {
     });
   }
 
-  async saveProgress(mediaId: string, stoppedAt: number, duration: number): Promise<WatchProgress> {
-    let record = await this.progressRepository.findOne({ where: { mediaId } });
+  async saveProgress(mediaId: string, stoppedAt: number, duration: number, userId: string): Promise<WatchProgress> {
+    let record = await this.progressRepository.findOne({ where: { mediaId, userId } });
     const isCompleted = duration > 0 ? stoppedAt / duration > 0.9 : false;
 
     if (!record) {
       record = this.progressRepository.create({
         mediaId,
+        userId,
         stoppedAt,
         duration,
         isCompleted,
@@ -420,10 +444,7 @@ export class MediaService {
         try { fs.unlinkSync(fullThumbPath); } catch {}
       }
     }
-    const progress = await this.progressRepository.findOne({ where: { mediaId: id } });
-    if (progress) {
-      await this.progressRepository.remove(progress);
-    }
+    await this.progressRepository.delete({ mediaId: id });
     await this.mediaRepository.remove(media);
   }
 }

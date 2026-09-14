@@ -8,6 +8,8 @@ import { StreamModule } from './stream/stream.module';
 import { MediaFile } from './media/entities/media-file.entity';
 import { WatchProgress } from './media/entities/watch-progress.entity';
 import { LibraryFolder } from './media/entities/library-folder.entity';
+import { User } from './users/entities/user.entity';
+import { UsersModule } from './users/users.module';
 import { THUMBNAILS_SERVE_PATH } from './media/media.service';
 
 const dataDir = join(process.cwd(), 'data');
@@ -20,7 +22,7 @@ if (!fs.existsSync(dataDir)) {
     TypeOrmModule.forRoot({
       type: 'sqlite',
       database: join(dataDir, 'localreel.sqlite'),
-      entities: [MediaFile, WatchProgress, LibraryFolder],
+      entities: [MediaFile, WatchProgress, LibraryFolder, User],
       synchronize: true, // Auto schema migration for SQLite
       logging: false,
     }),
@@ -36,6 +38,7 @@ if (!fs.existsSync(dataDir)) {
         exclude: ['/api/(.*)', `${THUMBNAILS_SERVE_PATH}/(.*)`],
       },
     ),
+    UsersModule,
     MediaModule,
     StreamModule,
   ],

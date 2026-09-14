@@ -5,9 +5,13 @@ import { WatchProgress } from './entities/watch-progress.entity';
 import { LibraryFolder } from './entities/library-folder.entity';
 import { MediaService } from './media.service';
 import { MediaController } from './media.controller';
+import { UsersModule } from '../users/users.module';
 
 @Module({
-  imports: [TypeOrmModule.forFeature([MediaFile, WatchProgress, LibraryFolder])],
+  imports: [
+    TypeOrmModule.forFeature([MediaFile, WatchProgress, LibraryFolder]),
+    UsersModule,
+  ],
   controllers: [MediaController],
   providers: [MediaService],
   exports: [MediaService],
