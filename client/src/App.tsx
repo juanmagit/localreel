@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useCallback } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Header } from './components/Header';
 import { MediaCard } from './components/MediaCard';
 import { VideoPlayer } from './components/VideoPlayer';
@@ -9,15 +10,27 @@ import { UserManagementModal } from './components/UserManagementModal';
 import { Film, FolderPlus, Sparkles } from 'lucide-react';
 import {
   MediaFile,
-  LibraryFolder,
   MediaEventPayload,
   AppNotification,
   User,
   CURRENT_USER_STORAGE_KEY,
 } from './types/media';
-import { getAuthHeaders } from './utils/api';
+import { useUsers } from './hooks/useUsersQuery';
+import {
+  useMediaList,
+  useFolders,
+  useScanLibraryMutation,
+  useAddFolderWithScan,
+  useRemoveFolderWithScan,
+  useCleanLibraryMutation,
+  useSaveProgressMutation,
+  updateMediaInCache,
+  MEDIA_KEYS,
+} from './hooks/useMediaQueries';
 
 export const App: React.FC = () => {
+  const queryClient = useQueryClient();
+
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
     return saved ? JSON.parse(saved) : null;
@@ -25,42 +38,54 @@ export const App: React.FC = () => {
 
   const [isUserSelectModalOpen, setIsUserSelectModalOpen] = useState<boolean>(false);
   const [isUserManagementModalOpen, setIsUserManagementModalOpen] = useState<boolean>(false);
-
-  const [mediaList, setMediaList] = useState<MediaFile[]>([]);
-  const [folders, setFolders] = useState<LibraryFolder[]>([]);
   const [searchQuery, setSearchQuery] = useState<string>('');
   const [selectedMedia, setSelectedMedia] = useState<MediaFile | null>(null);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState<boolean>(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState<boolean>(false);
-  const [isScanning, setIsScanning] = useState<boolean>(false);
-  const [isLoading, setIsLoading] = useState<boolean>(true);
 
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [scanProgress, setScanProgress] = useState<{ processed: number; total: number } | null>(null);
   const [toast, setToast] = useState<AppNotification | null>(null);
 
-  // Auto Login in Dev Mode (VITE_DEV_AUTO_LOGIN=true)
+  // React Query Hooks
+  const { data: users = [] } = useUsers();
+  const { data: mediaList = [], isLoading } = useMediaList(searchQuery, currentUser);
+  const { data: folders = [] } = useFolders(currentUser);
+
+  const scanMutation = useScanLibraryMutation(currentUser);
+  const addFolderMutation = useAddFolderWithScan(currentUser);
+  const removeFolderMutation = useRemoveFolderWithScan(currentUser);
+  const cleanMutation = useCleanLibraryMutation(currentUser);
+  const saveProgressMutation = useSaveProgressMutation(currentUser);
+
+  // Auto Login in Dev Mode (VITE_DEV_AUTO_LOGIN=true) or prompt user select
   useEffect(() => {
     const isDevAutoLogin = import.meta.env.VITE_DEV_AUTO_LOGIN === 'true';
-    if (!currentUser) {
+    if (!currentUser && users.length > 0) {
       if (isDevAutoLogin) {
-        fetch('/api/users')
-          .then((res) => (res.ok ? res.json() : []))
-          .then((users: User[]) => {
-            const admin = users.find((u) => u.role === 'admin') || users[0];
-            if (admin) {
-              setCurrentUser(admin);
-              localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(admin));
-            } else {
-              setIsUserSelectModalOpen(true);
-            }
-          })
-          .catch(() => setIsUserSelectModalOpen(true));
+        const admin = users.find((u) => u.role === 'admin') || users[0];
+        if (admin) {
+          setCurrentUser(admin);
+          localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(admin));
+        } else {
+          setIsUserSelectModalOpen(true);
+        }
       } else {
         setIsUserSelectModalOpen(true);
       }
     }
-  }, [currentUser]);
+  }, [currentUser, users]);
+
+  // Keep currentUser state in sync when user data is updated in background
+  useEffect(() => {
+    if (currentUser && users.length > 0) {
+      const updated = users.find((u) => u.id === currentUser.id);
+      if (updated && JSON.stringify(updated) !== JSON.stringify(currentUser)) {
+        setCurrentUser(updated);
+        localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(updated));
+      }
+    }
+  }, [users, currentUser]);
 
   const handleSelectUser = (user: User) => {
     setCurrentUser(user);
@@ -88,55 +113,11 @@ export const App: React.FC = () => {
     }, 4000);
   };
 
-  const fetchMedia = useCallback(async () => {
+  // SSE Events for Live Thumbnail and Scan Updates
+  useEffect(() => {
     if (!currentUser) return;
-    try {
-      const res = await fetch(`/api/media?q=${encodeURIComponent(searchQuery)}`, {
-        headers: getAuthHeaders(currentUser),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setMediaList(data);
-      }
-    } catch (err) {
-      console.error('Error cargando medios:', err);
-    } finally {
-      setIsLoading(false);
-    }
-  }, [searchQuery, currentUser]);
 
-  const fetchFolders = useCallback(async () => {
-    if (!currentUser) return;
-    try {
-      const res = await fetch('/api/media/folders', {
-        headers: getAuthHeaders(currentUser),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setFolders(data);
-      }
-    } catch (err) {
-      console.error('Error cargando carpetas:', err);
-    }
-  }, [currentUser]);
-
-  useEffect(() => {
-    if (currentUser) {
-      fetchFolders();
-    }
-  }, [fetchFolders, currentUser]);
-
-  useEffect(() => {
-    if (currentUser) {
-      const timer = setTimeout(() => {
-        fetchMedia();
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [fetchMedia, currentUser]);
-
-  useEffect(() => {
-    const eventSource = new EventSource('/api/media/events');
+    const eventSource = new EventSource(`/api/media/events?userId=${encodeURIComponent(currentUser.id)}`);
 
     eventSource.onmessage = (event) => {
       try {
@@ -150,21 +131,13 @@ export const App: React.FC = () => {
             'info',
           );
         } else if (payload.type === 'MEDIA_UPDATED' && payload.media) {
-          const updated = payload.media;
           if (payload.totalFiles && payload.processedCount !== undefined) {
             setScanProgress({ processed: payload.processedCount, total: payload.totalFiles });
           }
-          setMediaList((prevList) => {
-            const exists = prevList.some((item) => item.id === updated.id);
-            if (exists) {
-              return prevList.map((item) => (item.id === updated.id ? updated : item));
-            } else {
-              return [updated, ...prevList];
-            }
-          });
+          updateMediaInCache(queryClient, payload.media);
           addNotification(
             'Miniatura generada',
-            `Lista la portada para "${updated.title}"`,
+            `Lista la portada para "${payload.media.title}"`,
             'success',
           );
         } else if (payload.type === 'MEDIA_ERROR') {
@@ -178,7 +151,7 @@ export const App: React.FC = () => {
           );
         } else if (payload.type === 'SCAN_COMPLETED') {
           setScanProgress(null);
-          fetchMedia();
+          queryClient.invalidateQueries({ queryKey: MEDIA_KEYS.all });
           addNotification(
             'Escaneo completado',
             payload.message || 'Se han procesado todas las miniaturas y bibliotecas.',
@@ -193,93 +166,39 @@ export const App: React.FC = () => {
     return () => {
       eventSource.close();
     };
-  }, [fetchMedia]);
+  }, [queryClient, currentUser?.id]);
 
-  const handleScanLibrary = async () => {
-    if (!currentUser) return;
-    setIsScanning(true);
-    try {
-      await fetch('/api/media/scan', {
-        method: 'POST',
-        headers: getAuthHeaders(currentUser),
-      });
-      await fetchMedia();
-    } catch (err) {
-      console.error('Error al escanear biblioteca:', err);
-    } finally {
-      setIsScanning(false);
-    }
+  const handleScanLibrary = () => {
+    scanMutation.mutate();
   };
 
   const handleAddFolder = async (pathStr: string) => {
-    if (!currentUser) return;
-    const res = await fetch('/api/media/folders', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        ...getAuthHeaders(currentUser),
-      },
-      body: JSON.stringify({ path: pathStr }),
-    });
-
-    if (res.ok) {
-      await fetchFolders();
-      await handleScanLibrary();
-    }
+    await addFolderMutation.mutateAsync(pathStr);
   };
 
   const handleRemoveFolder = async (id: string) => {
-    if (!currentUser) return;
-    const res = await fetch(`/api/media/folders/${id}`, {
-      method: 'DELETE',
-      headers: getAuthHeaders(currentUser),
-    });
-
-    if (res.ok) {
-      await fetchFolders();
-      await handleScanLibrary();
-    }
+    await removeFolderMutation.mutateAsync(id);
   };
 
   const handleCleanLibrary = async () => {
-    if (!currentUser) return;
-    try {
-      const res = await fetch('/api/media/clean', {
-        method: 'POST',
-        headers: getAuthHeaders(currentUser),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        addNotification(
-          'Limpieza completada',
-          `Se eliminaron ${data.purgedCount || 0} registros huérfanos.`,
-          'info',
-        );
-        await fetchMedia();
-      }
-    } catch (err) {
-      console.error('Error limpiando biblioteca:', err);
-    }
+    const data = await cleanMutation.mutateAsync();
+    addNotification(
+      'Limpieza completada',
+      `Se eliminaron ${data?.purgedCount || 0} registros huérfanos.`,
+      'info',
+    );
   };
 
   const handleSaveProgress = useCallback(
     (mediaId: string, stoppedAt: number, duration: number) => {
-      if (!currentUser) return;
-      fetch(`/api/media/${mediaId}/progress`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(currentUser),
-        },
-        body: JSON.stringify({ stoppedAt, duration }),
-      }).catch((err) => console.error('Error guardando progreso:', err));
+      saveProgressMutation.mutate({ mediaId, stoppedAt, duration });
     },
-    [currentUser],
+    [saveProgressMutation],
   );
 
   const handleClosePlayer = () => {
     setSelectedMedia(null);
-    fetchMedia();
+    queryClient.invalidateQueries({ queryKey: MEDIA_KEYS.all });
   };
 
   const handleMarkAllNotificationsAsRead = () => {
@@ -299,7 +218,7 @@ export const App: React.FC = () => {
         setSearchQuery={setSearchQuery}
         onOpenFolders={() => setIsFolderModalOpen(true)}
         onScanLibrary={handleScanLibrary}
-        isScanning={isScanning}
+        isScanning={scanMutation.isPending}
         scanProgress={scanProgress}
         unreadNotificationsCount={unreadNotificationsCount}
         onOpenNotifications={() => setIsNotificationModalOpen(true)}
@@ -362,21 +281,6 @@ export const App: React.FC = () => {
         isOpen={isUserManagementModalOpen}
         onClose={() => setIsUserManagementModalOpen(false)}
         currentUser={currentUser}
-        onUsersChanged={() => {
-          fetchMedia();
-          if (currentUser) {
-            fetch('/api/users')
-              .then((res) => (res.ok ? res.json() : []))
-              .then((usersList: User[]) => {
-                const updated = usersList.find((u) => u.id === currentUser.id);
-                if (updated) {
-                  setCurrentUser(updated);
-                  localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(updated));
-                }
-              })
-              .catch(() => {});
-          }
-        }}
       />
 
       <FolderModal
@@ -417,3 +321,4 @@ export const App: React.FC = () => {
     </div>
   );
 };
+

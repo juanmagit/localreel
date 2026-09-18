@@ -13,7 +13,7 @@ export class UserAuthGuard implements CanActivate {
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest();
-    const userId = request.headers[USER_ID_HEADER] as string;
+    const userId = (request.headers[USER_ID_HEADER] || request.query?.userId) as string;
 
     if (!userId) {
       throw new UnauthorizedException(`Identificación de usuario requerida (cabecera ${USER_ID_HEADER} ausente).`);

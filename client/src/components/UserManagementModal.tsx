@@ -1,7 +1,12 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { X, UserPlus, Trash2, Shield, Check, Pencil } from 'lucide-react';
 import { User, UserRole } from '../types/media';
-import { getAuthHeaders } from '../utils/api';
+import {
+  useUsers,
+  useCreateUserMutation,
+  useUpdateUserMutation,
+  useDeleteUserMutation,
+} from '../hooks/useUsersQuery';
 
 interface UserManagementModalProps {
   isOpen: boolean;
@@ -23,14 +28,17 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
   currentUser,
   onUsersChanged,
 }) => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { data: users = [], isLoading: loading } = useUsers();
+  const createUserMutation = useCreateUserMutation(currentUser);
+  const updateUserMutation = useUpdateUserMutation(currentUser);
+  const deleteUserMutation = useDeleteUserMutation(currentUser);
+
   const [name, setName] = useState<string>('');
   const [role, setRole] = useState<UserRole>('user');
   const [pin, setPin] = useState<string>('');
   const [avatarColor, setAvatarColor] = useState<string>(PRESET_COLORS[0]);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [submitting, setSubmitting] = useState<boolean>(false);
+
   const [editingUserId, setEditingUserId] = useState<string | null>(null);
   const [editingName, setEditingName] = useState<string>('');
   const [editingRole, setEditingRole] = useState<UserRole>('user');
@@ -38,30 +46,9 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
   const [editingAvatarColor, setEditingAvatarColor] = useState<string>(PRESET_COLORS[0]);
   const [editingErrorMsg, setEditingErrorMsg] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (isOpen) {
-      fetchUsers();
-    }
-  }, [isOpen]);
-
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/users');
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data);
-      }
-    } catch (err) {
-      console.error('Error cargando lista de usuarios:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
-
   if (!isOpen) return null;
 
-  const handleCreateUser = async (e: React.FormEvent) => {
+  const handleCreateUser = (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) {
       setErrorMsg('Introduce un nombre para el usuario.');
@@ -72,38 +59,26 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
       return;
     }
 
-    setSubmitting(true);
     setErrorMsg(null);
-    try {
-      const res = await fetch('/api/users', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(currentUser),
+    createUserMutation.mutate(
+      {
+        name: name.trim(),
+        role,
+        pin: role === 'admin' ? pin.trim() : undefined,
+        avatarColor,
+      },
+      {
+        onSuccess: () => {
+          setName('');
+          setPin('');
+          setRole('user');
+          if (onUsersChanged) onUsersChanged();
         },
-        body: JSON.stringify({
-          name: name.trim(),
-          role,
-          pin: role === 'admin' ? pin.trim() : undefined,
-          avatarColor,
-        }),
-      });
-
-      const data = await res.json();
-      if (res.ok) {
-        setName('');
-        setPin('');
-        setRole('user');
-        fetchUsers();
-        if (onUsersChanged) onUsersChanged();
-      } else {
-        setErrorMsg(data.message || 'No se pudo crear el usuario.');
-      }
-    } catch {
-      setErrorMsg('Error de conexión al crear usuario.');
-    } finally {
-      setSubmitting(false);
-    }
+        onError: (err) => {
+          setErrorMsg(err.message || 'No se pudo crear el usuario.');
+        },
+      },
+    );
   };
 
   const handleStartEdit = (userToEdit: User) => {
@@ -121,7 +96,7 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
     setEditingErrorMsg(null);
   };
 
-  const handleSaveEdit = async (userId: string) => {
+  const handleSaveEdit = (userId: string) => {
     const trimmedName = editingName.trim();
     if (!trimmedName) {
       setEditingErrorMsg('El nombre no puede estar vacío.');
@@ -133,54 +108,39 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
     }
 
     setEditingErrorMsg(null);
-    try {
-      const res = await fetch(`/api/users/${userId}`, {
-        method: 'PATCH',
-        headers: {
-          'Content-Type': 'application/json',
-          ...getAuthHeaders(currentUser),
-        },
-        body: JSON.stringify({
+    updateUserMutation.mutate(
+      {
+        id: userId,
+        dto: {
           name: trimmedName,
           role: editingRole,
           pin: editingPin.trim() || undefined,
           avatarColor: editingAvatarColor,
-        }),
-      });
-
-      if (res.ok) {
-        setEditingUserId(null);
-        fetchUsers();
-        if (onUsersChanged) onUsersChanged();
-      } else {
-        const data = await res.json();
-        setEditingErrorMsg(data.message || 'No se pudo actualizar el usuario.');
-      }
-    } catch (err) {
-      console.error('Error al actualizar usuario:', err);
-      setEditingErrorMsg('Error de conexión al actualizar usuario.');
-    }
+        },
+      },
+      {
+        onSuccess: () => {
+          setEditingUserId(null);
+          if (onUsersChanged) onUsersChanged();
+        },
+        onError: (err) => {
+          setEditingErrorMsg(err.message || 'No se pudo actualizar el usuario.');
+        },
+      },
+    );
   };
 
-  const handleDeleteUser = async (userToDelete: User) => {
+  const handleDeleteUser = (userToDelete: User) => {
     if (!window.confirm(`¿Seguro que deseas eliminar al usuario "${userToDelete.name}"?`)) return;
 
-    try {
-      const res = await fetch(`/api/users/${userToDelete.id}`, {
-        method: 'DELETE',
-        headers: getAuthHeaders(currentUser),
-      });
-
-      if (res.ok) {
-        fetchUsers();
+    deleteUserMutation.mutate(userToDelete.id, {
+      onSuccess: () => {
         if (onUsersChanged) onUsersChanged();
-      } else {
-        const data = await res.json();
-        alert(data.message || 'No se pudo eliminar el usuario.');
-      }
-    } catch (err) {
-      console.error('Error eliminando usuario:', err);
-    }
+      },
+      onError: (err) => {
+        alert(err.message || 'No se pudo eliminar el usuario.');
+      },
+    });
   };
 
   return (
@@ -264,11 +224,11 @@ export const UserManagementModal: React.FC<UserManagementModalProps> = ({
 
             <button
               type="submit"
-              disabled={submitting}
+              disabled={createUserMutation.isPending}
               className="w-full py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-lg font-medium text-sm transition-all shadow-md flex items-center justify-center gap-2"
             >
               <UserPlus size={16} />
-              {submitting ? 'Creando...' : 'Crear Usuario'}
+              {createUserMutation.isPending ? 'Creando...' : 'Crear Usuario'}
             </button>
           </form>
 

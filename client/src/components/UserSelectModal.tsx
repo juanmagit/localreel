@@ -1,6 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { Shield, KeyRound, ArrowRight, X } from 'lucide-react';
 import { User } from '../types/media';
+import { useUsers, useLoginMutation } from '../hooks/useUsersQuery';
 
 interface UserSelectModalProps {
   isOpen: boolean;
@@ -11,33 +12,12 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
   isOpen,
   onSelectUser,
 }) => {
-  const [users, setUsers] = useState<User[]>([]);
-  const [loading, setLoading] = useState<boolean>(true);
+  const { data: users = [], isLoading: loading } = useUsers();
+  const loginMutation = useLoginMutation();
+
   const [selectedUserForPin, setSelectedUserForPin] = useState<User | null>(null);
   const [pin, setPin] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-  const [submittingPin, setSubmittingPin] = useState<boolean>(false);
-
-  useEffect(() => {
-    if (isOpen) {
-      fetchUsers();
-    }
-  }, [isOpen]);
-
-  const fetchUsers = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch('/api/users');
-      if (res.ok) {
-        const data = await res.json();
-        setUsers(data);
-      }
-    } catch (err) {
-      console.error('Error cargando usuarios:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
 
   if (!isOpen) return null;
 
@@ -60,27 +40,24 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
       return;
     }
 
-    setSubmittingPin(true);
     setErrorMsg(null);
-    try {
-      const res = await fetch('/api/users/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: selectedUserForPin.id, pin: pin.trim() }),
-      });
-      const data = await res.json();
-      if (res.ok && data.success && data.user) {
-        setSelectedUserForPin(null);
-        setPin('');
-        onSelectUser(data.user);
-      } else {
-        setErrorMsg(data.message || 'PIN incorrecto.');
-      }
-    } catch {
-      setErrorMsg('Error de conexión al verificar PIN.');
-    } finally {
-      setSubmittingPin(false);
-    }
+    loginMutation.mutate(
+      { userId: selectedUserForPin.id, pin: pin.trim() },
+      {
+        onSuccess: (data) => {
+          if (data.success && data.user) {
+            setSelectedUserForPin(null);
+            setPin('');
+            onSelectUser(data.user);
+          } else {
+            setErrorMsg(data.message || 'PIN incorrecto.');
+          }
+        },
+        onError: (err) => {
+          setErrorMsg(err.message || 'Error de conexión al verificar PIN.');
+        },
+      },
+    );
   };
 
   const getInitials = (name: string) => {
@@ -143,10 +120,10 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
                 </button>
                 <button
                   type="submit"
-                  disabled={submittingPin || pin.length !== 4}
+                  disabled={loginMutation.isPending || pin.length !== 4}
                   className="flex-1 py-2.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white rounded-xl font-medium transition-all shadow-lg flex items-center justify-center gap-2 text-sm"
                 >
-                  {submittingPin ? 'Verificando...' : 'Acceder'}
+                  {loginMutation.isPending ? 'Verificando...' : 'Acceder'}
                   <ArrowRight size={16} />
                 </button>
               </div>
