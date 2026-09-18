@@ -1,15 +1,12 @@
 import React, { useState, useEffect, useCallback } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
+import { Outlet, useNavigate } from '@tanstack/react-router';
 import { Header } from './components/Header';
-import { MediaCard } from './components/MediaCard';
-import { VideoPlayer } from './components/VideoPlayer';
 import { FolderModal } from './components/FolderModal';
 import { NotificationModal } from './components/NotificationModal';
-import { UserSelectModal } from './components/UserSelectModal';
 import { UserManagementModal } from './components/UserManagementModal';
-import { Film, FolderPlus, Sparkles } from 'lucide-react';
+import { Sparkles } from 'lucide-react';
 import {
-  MediaFile,
   MediaEventPayload,
   AppNotification,
   User,
@@ -28,18 +25,19 @@ import {
   MEDIA_KEYS,
 } from './hooks/useMediaQueries';
 
+import { AppContext } from './context/AppContext';
+
 export const App: React.FC = () => {
   const queryClient = useQueryClient();
+  const navigate = useNavigate();
 
   const [currentUser, setCurrentUser] = useState<User | null>(() => {
     const saved = localStorage.getItem(CURRENT_USER_STORAGE_KEY);
     return saved ? JSON.parse(saved) : null;
   });
 
-  const [isUserSelectModalOpen, setIsUserSelectModalOpen] = useState<boolean>(false);
   const [isUserManagementModalOpen, setIsUserManagementModalOpen] = useState<boolean>(false);
   const [searchQuery, setSearchQuery] = useState<string>('');
-  const [selectedMedia, setSelectedMedia] = useState<MediaFile | null>(null);
   const [isFolderModalOpen, setIsFolderModalOpen] = useState<boolean>(false);
   const [isNotificationModalOpen, setIsNotificationModalOpen] = useState<boolean>(false);
 
@@ -68,13 +66,13 @@ export const App: React.FC = () => {
           setCurrentUser(admin);
           localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(admin));
         } else {
-          setIsUserSelectModalOpen(true);
+          navigate({ to: '/login' });
         }
       } else {
-        setIsUserSelectModalOpen(true);
+        navigate({ to: '/login' });
       }
     }
-  }, [currentUser, users]);
+  }, [currentUser, users, navigate]);
 
   // Keep currentUser state in sync when user data is updated in background
   useEffect(() => {
@@ -90,11 +88,12 @@ export const App: React.FC = () => {
   const handleSelectUser = (user: User) => {
     setCurrentUser(user);
     localStorage.setItem(CURRENT_USER_STORAGE_KEY, JSON.stringify(user));
-    setIsUserSelectModalOpen(false);
   };
 
   const handleSwitchUser = () => {
-    setIsUserSelectModalOpen(true);
+    setCurrentUser(null);
+    localStorage.removeItem(CURRENT_USER_STORAGE_KEY);
+    navigate({ to: '/login' });
   };
 
   const addNotification = (title: string, message: string, type: AppNotification['type']) => {
@@ -196,11 +195,6 @@ export const App: React.FC = () => {
     [saveProgressMutation],
   );
 
-  const handleClosePlayer = () => {
-    setSelectedMedia(null);
-    queryClient.invalidateQueries({ queryKey: MEDIA_KEYS.all });
-  };
-
   const handleMarkAllNotificationsAsRead = () => {
     setNotifications((prev) => prev.map((n) => ({ ...n, read: true })));
   };
@@ -227,55 +221,22 @@ export const App: React.FC = () => {
         onOpenUserManagement={() => setIsUserManagementModalOpen(true)}
       />
 
-      <main className="flex-1 px-8 pb-12">
-        <div className="mt-8">
-          <div className="font-display text-xl font-bold mb-5 flex items-center justify-between">
-            <span>Catálogo de Vídeos ({mediaList.length})</span>
-          </div>
-
-          {isLoading ? (
-            <div className="flex flex-col items-center justify-center py-16 gap-3 text-gray-400">
-              <Film size={40} className="animate-spin" />
-              <p className="text-sm">Cargando catálogo...</p>
-            </div>
-          ) : mediaList.length === 0 ? (
-            <div className="glass-panel rounded-2xl flex flex-col items-center justify-center p-12 text-center gap-4 text-gray-400">
-              <Film size={48} className="text-pink-500" />
-              <h3 className="font-display text-lg font-semibold text-white">No se han encontrado vídeos</h3>
-              <p className="max-w-md text-sm leading-relaxed">
-                {folders.length === 0
-                  ? 'Añade una carpeta de tu disco duro para escanearla y reproducir tus películas en la red local.'
-                  : 'No se han detectado archivos de vídeo (.mp4, .mkv, .avi, .mov) en tus carpetas configuradas.'}
-              </p>
-              {currentUser?.role === 'admin' && (
-                <button
-                  className="inline-flex items-center gap-2 px-5 py-2.5 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 transition-all mt-2"
-                  onClick={() => setIsFolderModalOpen(true)}
-                  id="btn-empty-add-folder"
-                >
-                  <FolderPlus size={18} />
-                  <span>Configurar Directorios</span>
-                </button>
-              )}
-            </div>
-          ) : (
-            <div className="grid grid-cols-[repeat(auto-fill,minmax(240px,1fr))] gap-6">
-              {mediaList.map((media) => (
-                <MediaCard
-                  key={media.id}
-                  media={media}
-                  onSelect={(item) => setSelectedMedia(item)}
-                />
-              ))}
-            </div>
-          )}
-        </div>
+      <main className="flex-1 px-4 sm:px-8 pb-12">
+        <AppContext.Provider
+          value={{
+            currentUser,
+            mediaList,
+            isLoading,
+            folders,
+            onOpenFolderModal: () => setIsFolderModalOpen(true),
+            onSaveProgress: handleSaveProgress,
+            onSelectUser: handleSelectUser,
+            onSwitchUser: handleSwitchUser,
+          }}
+        >
+          <Outlet />
+        </AppContext.Provider>
       </main>
-
-      <UserSelectModal
-        isOpen={isUserSelectModalOpen}
-        onSelectUser={handleSelectUser}
-      />
 
       <UserManagementModal
         isOpen={isUserManagementModalOpen}
@@ -309,14 +270,6 @@ export const App: React.FC = () => {
             <p className="text-xs text-gray-200 mt-0.5 leading-relaxed">{toast.message}</p>
           </div>
         </div>
-      )}
-
-      {selectedMedia && (
-        <VideoPlayer
-          media={selectedMedia}
-          onClose={handleClosePlayer}
-          onProgressUpdate={handleSaveProgress}
-        />
       )}
     </div>
   );

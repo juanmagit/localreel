@@ -50,88 +50,92 @@ export const Header: React.FC<HeaderProps> = ({
   const isAdmin = currentUser?.role === 'admin';
 
   return (
-    <header className="sticky top-0 z-50 flex items-center justify-between px-8 py-4 bg-brand-dark/85 backdrop-blur-md border-b border-white/10">
-      <div className="flex items-center gap-3 font-display text-2xl font-extrabold tracking-wide uppercase bg-gradient-to-r from-purple-400 via-pink-500 to-pink-600 bg-clip-text text-transparent">
-        <Film className="text-pink-500" size={28} />
+    <header className="sticky top-0 z-50 flex items-center justify-between px-4 sm:px-8 h-[74px] bg-brand-dark/85 backdrop-blur-md border-b border-white/10 gap-2">
+      <div className="flex items-center gap-2 sm:gap-3 font-display text-xl sm:text-2xl font-extrabold tracking-wide uppercase bg-gradient-to-r from-purple-400 via-pink-500 to-pink-600 bg-clip-text text-transparent shrink-0">
+        <Film className="text-pink-500" size={24} />
         <span>LocalReel</span>
       </div>
 
-      <div className="flex items-center gap-2 px-4 py-2 bg-white/5 border border-white/10 rounded-full w-80 focus-within:w-96 focus-within:border-purple-500 focus-within:shadow-[0_0_15px_rgba(124,58,237,0.3)] transition-all duration-300">
-        <Search size={18} className="text-gray-400" />
-        <input
-          type="text"
-          placeholder="Buscar películas o vídeos..."
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-          className="bg-transparent border-none outline-none text-gray-100 text-sm w-full placeholder-gray-400"
-          id="search-media-input"
-        />
-      </div>
+      {currentUser && (
+        <div className="flex items-center gap-2 px-3 sm:px-4 py-1.5 sm:py-2 bg-white/5 border border-white/10 rounded-full w-32 sm:w-80 focus-within:w-48 sm:focus-within:w-96 focus-within:border-purple-500 focus-within:shadow-[0_0_15px_rgba(124,58,237,0.3)] transition-all duration-300">
+          <Search size={18} className="text-gray-400 shrink-0" />
+          <input
+            type="text"
+            placeholder="Buscar..."
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            className="bg-transparent border-none outline-none text-gray-100 text-xs sm:text-sm w-full placeholder-gray-400"
+            id="search-media-input"
+          />
+        </div>
+      )}
 
-      <div className="flex items-center gap-3">
-        {/* Progress Counter Badge */}
-        {isBatchProcessing && (
-          <div className="flex items-center gap-2.5 px-3 py-1.5 bg-purple-950/60 border border-purple-500/40 rounded-lg text-xs font-mono text-purple-200 animate-pulse" id="header-scan-progress">
-            <Loader2 size={14} className="animate-spin text-pink-400" />
-            <span>Miniaturas {scanProgress.processed}/{scanProgress.total} ({progressPercent}%)</span>
-            <div className="w-12 h-1.5 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
-                style={{ width: `${progressPercent}%` }}
-              />
+      {currentUser && (
+        <div className="flex items-center gap-2 sm:gap-3 shrink-0">
+          {/* Progress Counter Badge */}
+          {isBatchProcessing && (
+            <div className="hidden md:flex items-center gap-2.5 px-3 py-1.5 bg-purple-950/60 border border-purple-500/40 rounded-lg text-xs font-mono text-purple-200 animate-pulse" id="header-scan-progress">
+              <Loader2 size={14} className="animate-spin text-pink-400" />
+              <span>Miniaturas {scanProgress.processed}/{scanProgress.total} ({progressPercent}%)</span>
+              <div className="w-12 h-1.5 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-gradient-to-r from-purple-500 to-pink-500 transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
             </div>
-          </div>
-        )}
-
-        {/* Notifications Bell */}
-        <button
-          onClick={onOpenNotifications}
-          className="relative p-2 rounded-lg text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 border border-white/10 transition-all duration-200"
-          title="Centro de notificaciones"
-          id="btn-header-notifications"
-        >
-          <Bell size={20} />
-          {unreadNotificationsCount > 0 && (
-            <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-pink-500 rounded-full border border-gray-900 shadow-md">
-              {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
-            </span>
           )}
-        </button>
 
-        {/* Admin Folder Management (only for admins) */}
-        {isAdmin && (
+          {/* Notifications Bell */}
           <button
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-white/10 hover:bg-white/20 text-gray-100 border border-white/10 transition-all duration-200"
-            onClick={onOpenFolders}
-            id="btn-manage-folders"
+            onClick={onOpenNotifications}
+            className="relative p-2 rounded-lg text-gray-300 hover:text-white bg-white/10 hover:bg-white/20 border border-white/10 transition-all duration-200"
+            title="Centro de notificaciones"
+            id="btn-header-notifications"
           >
-            <FolderPlus size={18} />
-            <span>Directorios</span>
+            <Bell size={18} />
+            {unreadNotificationsCount > 0 && (
+              <span className="absolute -top-1 -right-1 flex items-center justify-center min-w-[18px] h-[18px] px-1 text-[10px] font-bold text-white bg-pink-500 rounded-full border border-gray-900 shadow-md">
+                {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+              </span>
+            )}
           </button>
-        )}
 
-        {/* Scan Library Button */}
-        {isAdmin && (
-          <button
-            className="inline-flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50"
-            onClick={onScanLibrary}
-            disabled={isScanning}
-            id="btn-scan-library"
-          >
-            <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} />
-            <span>{isScanning ? 'Escaneando...' : 'Reescanear'}</span>
-          </button>
-        )}
+          {/* Admin Folder Management (only for admins) */}
+          {isAdmin && (
+            <button
+              className="inline-flex items-center gap-2 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-semibold bg-white/10 hover:bg-white/20 text-gray-100 border border-white/10 transition-all duration-200"
+              onClick={onOpenFolders}
+              title="Directorios"
+              id="btn-manage-folders"
+            >
+              <FolderPlus size={18} />
+              <span className="hidden md:inline">Directorios</span>
+            </button>
+          )}
 
-        {/* User Profile Badge & Menu */}
-        {currentUser && (
+          {/* Scan Library Button */}
+          {isAdmin && (
+            <button
+              className="inline-flex items-center gap-2 p-2 sm:px-4 sm:py-2 rounded-lg text-sm font-semibold bg-gradient-to-r from-purple-600 to-pink-500 text-white shadow-lg hover:shadow-purple-500/40 hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-50"
+              onClick={onScanLibrary}
+              disabled={isScanning}
+              title="Reescanear"
+              id="btn-scan-library"
+            >
+              <RefreshCw size={18} className={isScanning ? 'animate-spin' : ''} />
+              <span className="hidden md:inline">{isScanning ? 'Escaneando...' : 'Reescanear'}</span>
+            </button>
+          )}
+
+          {/* User Profile Badge & Menu */}
           <div className="relative" ref={userMenuRef}>
             <button
               onClick={() => setIsUserMenuOpen(!isUserMenuOpen)}
-              className="flex items-center gap-2.5 p-1.5 pl-3 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition-all duration-200"
+              className="flex items-center gap-2 p-1.5 sm:pl-3 rounded-full bg-white/10 hover:bg-white/15 border border-white/10 transition-all duration-200"
               id="btn-user-profile-menu"
             >
-              <div className="flex flex-col items-end text-right leading-tight">
+              <div className="hidden sm:flex flex-col items-end text-right leading-tight">
                 <span className="text-xs font-semibold text-white truncate max-w-[100px]">{currentUser.name}</span>
                 <span className="text-[10px] text-gray-400 capitalize flex items-center gap-0.5">
                   {isAdmin && <Shield size={10} className="text-amber-400 fill-amber-400/20" />}
@@ -175,8 +179,8 @@ export const Header: React.FC<HeaderProps> = ({
               </div>
             )}
           </div>
-        )}
-      </div>
+        </div>
+      )}
     </header>
   );
 };

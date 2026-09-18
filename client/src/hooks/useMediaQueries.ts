@@ -5,6 +5,7 @@ import { getAuthHeaders } from '../utils/api';
 export const MEDIA_KEYS = {
   all: ['media'] as const,
   list: (searchQuery: string, userId?: string) => ['media', { searchQuery, userId }] as const,
+  detail: (id: string, userId?: string) => ['media', 'detail', id, { userId }] as const,
 };
 
 export const FOLDER_KEYS = {
@@ -36,6 +37,20 @@ export function useMediaList(searchQuery: string, currentUser: User | null) {
       return res.json();
     },
     enabled: !!currentUser,
+  });
+}
+
+export function useMediaDetail(id: string, currentUser: User | null) {
+  return useQuery<MediaFile>({
+    queryKey: MEDIA_KEYS.detail(id, currentUser?.id),
+    queryFn: async () => {
+      const res = await fetch(`/api/media/${id}`, {
+        headers: getAuthHeaders(currentUser),
+      });
+      if (!res.ok) throw new Error('Error al cargar la información del vídeo');
+      return res.json();
+    },
+    enabled: !!currentUser && !!id,
   });
 }
 

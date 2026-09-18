@@ -3,23 +3,17 @@ import { Shield, KeyRound, ArrowRight, X } from 'lucide-react';
 import { User } from '../types/media';
 import { useUsers, useLoginMutation } from '../hooks/useUsersQuery';
 
-interface UserSelectModalProps {
-  isOpen: boolean;
+interface UserSelectProps {
   onSelectUser: (user: User) => void;
 }
 
-export const UserSelectModal: React.FC<UserSelectModalProps> = ({
-  isOpen,
-  onSelectUser,
-}) => {
+export const UserSelect: React.FC<UserSelectProps> = ({ onSelectUser }) => {
   const { data: users = [], isLoading: loading } = useUsers();
   const loginMutation = useLoginMutation();
 
   const [selectedUserForPin, setSelectedUserForPin] = useState<User | null>(null);
   const [pin, setPin] = useState<string>('');
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
-
-  if (!isOpen) return null;
 
   const handleCardClick = (user: User) => {
     setErrorMsg(null);
@@ -70,8 +64,8 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/80 backdrop-blur-md animate-fade-in">
-      <div className="relative w-full max-w-2xl bg-gray-900/90 border border-white/10 rounded-2xl p-8 shadow-2xl overflow-hidden">
+    <div className="flex items-center justify-center min-h-[75vh] p-4 animate-fade-in">
+      <div className="relative w-full max-w-2xl bg-gray-900/90 border border-white/10 rounded-2xl p-8 shadow-2xl overflow-hidden backdrop-blur-md">
         {selectedUserForPin ? (
           <div className="flex flex-col items-center justify-center py-6 animate-scale-up">
             <button
@@ -141,12 +135,12 @@ export const UserSelectModal: React.FC<UserSelectModalProps> = ({
                 <div className="w-8 h-8 border-4 border-purple-500 border-t-transparent rounded-full animate-spin"></div>
               </div>
             ) : (
-              <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 py-4">
+              <div className="flex flex-wrap justify-center items-center gap-6 py-4">
                 {users.map((user) => (
                   <button
                     key={user.id}
                     onClick={() => handleCardClick(user)}
-                    className="group flex flex-col items-center p-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-purple-500/50 transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl"
+                    className="group flex flex-col items-center w-36 sm:w-44 p-5 rounded-2xl bg-white/5 hover:bg-white/10 border border-white/5 hover:border-purple-500/50 transition-all duration-300 transform hover:-translate-y-1 hover:shadow-xl text-center"
                   >
                     <div
                       className="relative w-20 h-20 rounded-2xl flex items-center justify-center text-2xl font-bold text-white shadow-md group-hover:scale-105 transition-transform duration-300 mb-3"
