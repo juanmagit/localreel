@@ -148,6 +148,12 @@ export const App: React.FC = () => {
             payload.message || `No se pudo procesar la miniatura para el archivo`,
             'warning',
           );
+        } else if (payload.type === 'SUBTITLE_ERROR') {
+          addNotification(
+            'Error en subtítulos',
+            payload.message || 'No se pudo leer el archivo de subtítulos',
+            'warning',
+          );
         } else if (payload.type === 'SCAN_COMPLETED') {
           setScanProgress(null);
           queryClient.invalidateQueries({ queryKey: MEDIA_KEYS.all });

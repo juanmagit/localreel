@@ -1,4 +1,4 @@
-import { Controller, Get, Post, Delete, Body, Param, Query, Sse, MessageEvent, UseGuards } from '@nestjs/common';
+import { Controller, Get, Post, Delete, Body, Param, Query, Sse, MessageEvent, UseGuards, Header } from '@nestjs/common';
 import { Observable } from 'rxjs';
 import { MediaService } from './media.service';
 import { UserAuthGuard } from '../users/guards/user-auth.guard';
@@ -59,6 +59,15 @@ export class MediaController {
     @CurrentUser('id') userId: string,
   ) {
     return this.mediaService.findOne(id, userId);
+  }
+
+  @Get(':id/subtitles/:trackId')
+  @Header('Content-Type', 'text/vtt; charset=utf-8')
+  async getSubtitle(
+    @Param('id') id: string,
+    @Param('trackId') trackId: string,
+  ) {
+    return this.mediaService.getSubtitleContent(id, trackId);
   }
 
   @Post(':id/progress')

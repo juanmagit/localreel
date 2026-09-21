@@ -1,4 +1,5 @@
 import { Entity, PrimaryGeneratedColumn, Column, CreateDateColumn, UpdateDateColumn } from 'typeorm';
+import { SubtitleTrack } from '@shared/types';
 
 @Entity('media_files')
 export class MediaFile {
@@ -37,6 +38,9 @@ export class MediaFile {
 
   @Column({ nullable: true })
   folderPath: string;
+
+  @Column({ type: 'simple-json', nullable: true })
+  subtitles: SubtitleTrack[];
 
   @CreateDateColumn()
   createdAt: Date;

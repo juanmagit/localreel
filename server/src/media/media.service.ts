@@ -8,9 +8,10 @@ import { LibraryFolder } from './entities/library-folder.entity';
 import * as fs from 'fs';
 import * as path from 'path';
 import { execSync, execFile } from 'child_process';
-import { MediaFile as SharedMediaFile, MediaEventPayload } from '@shared/types';
+import { MediaFile as SharedMediaFile, MediaEventPayload, SubtitleTrack } from '@shared/types';
 
 const VIDEO_EXTENSIONS = new Set(['.mp4', '.mkv', '.avi', '.mov', '.webm', '.m4v', '.ts', '.flv', '.wmv']);
+const SUBTITLE_EXTENSIONS = new Set(['.srt', '.vtt', '.ass', '.sub']);
 
 export const THUMBNAILS_FOLDER_NAME = process.env.THUMBNAILS_FOLDER || 'thumbnails';
 export const THUMBNAILS_SERVE_PATH = `/${THUMBNAILS_FOLDER_NAME}`;
@@ -94,6 +95,14 @@ export class MediaService {
       processedCount,
       totalFiles,
       message: `No se pudo generar miniatura para "${media.title}": ${errorMessage}`,
+    };
+    this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
+  }
+
+  private notifySubtitleError(targetPath: string, errorMessage: string) {
+    const payload: MediaEventPayload = {
+      type: 'SUBTITLE_ERROR',
+      message: `No se pudo procesar el subtítulo (${path.basename(targetPath)}): ${errorMessage}`,
     };
     this.mediaEvents$.next({ data: JSON.stringify(payload) } as MessageEvent);
   }
@@ -315,6 +324,8 @@ export class MediaService {
     let newCount = 0;
     for (const filePath of filesFound) {
       let media = await this.mediaRepository.findOne({ where: { filePath } });
+      const detectedSubtitles = this.findSubtitlesForVideo(filePath);
+
       if (!media) {
         const stats = fs.statSync(filePath);
         const ext = path.extname(filePath).toLowerCase();
@@ -328,6 +339,7 @@ export class MediaService {
           fileSize: stats.size,
           format: ext,
           folderPath: dirPath,
+          subtitles: detectedSubtitles,
           duration: 0,
         });
 
@@ -336,13 +348,161 @@ export class MediaService {
 
         // Enqueue for background thumbnail & metadata processing
         this.enqueueThumbnailProcessing(media);
-      } else if (!media.thumbnailPath || !fs.existsSync(this.getThumbnailAbsolutePath(media.id))) {
-        // Enqueue missing thumbnail for existing files
-        this.enqueueThumbnailProcessing(media);
+      } else {
+        media.subtitles = detectedSubtitles;
+        await this.mediaRepository.save(media);
+
+        if (!media.thumbnailPath || !fs.existsSync(this.getThumbnailAbsolutePath(media.id))) {
+          // Enqueue missing thumbnail for existing files
+          this.enqueueThumbnailProcessing(media);
+        }
       }
     }
 
     return filesFound.length;
+  }
+
+  private findSubtitlesForVideo(videoFilePath: string): SubtitleTrack[] {
+    const dir = path.dirname(videoFilePath);
+    const videoExt = path.extname(videoFilePath);
+    const videoBaseName = path.basename(videoFilePath, videoExt);
+    const videoBaseNameLower = videoBaseName.toLowerCase();
+
+    if (!fs.existsSync(dir)) return [];
+
+    const subtitleFiles: { fullPath: string; relativeName: string }[] = [];
+
+    const scanSubDir = (currentDir: string) => {
+      try {
+        const entries = fs.readdirSync(currentDir, { withFileTypes: true });
+        for (const entry of entries) {
+          const fullPath = path.join(currentDir, entry.name);
+          if (entry.isDirectory()) {
+            scanSubDir(fullPath);
+          } else if (entry.isFile()) {
+            const ext = path.extname(entry.name).toLowerCase();
+            if (SUBTITLE_EXTENSIONS.has(ext)) {
+              subtitleFiles.push({
+                fullPath,
+                relativeName: path.relative(dir, fullPath),
+              });
+            }
+          }
+        }
+      } catch (err: any) {
+        this.logger.error(`Error al escanear directorio de subtítulos ${currentDir}: ${err.message}`);
+        this.notifySubtitleError(currentDir, err.message);
+      }
+    };
+
+    scanSubDir(dir);
+    if (subtitleFiles.length === 0) return [];
+
+    // Count video files in the main directory
+    let videoCountInDir = 0;
+    try {
+      const dirEntries = fs.readdirSync(dir, { withFileTypes: true });
+      for (const e of dirEntries) {
+        if (e.isFile() && VIDEO_EXTENSIONS.has(path.extname(e.name).toLowerCase())) {
+          videoCountInDir++;
+        }
+      }
+    } catch (err: any) {
+      this.logger.error(`Error al leer directorio principal para la búsqueda de subtítulos ${dir}: ${err.message}`);
+      this.notifySubtitleError(dir, err.message);
+    }
+
+    const tracks: SubtitleTrack[] = [];
+    let index = 0;
+
+    for (const { fullPath, relativeName } of subtitleFiles) {
+      const subExt = path.extname(fullPath).toLowerCase();
+      const subBaseName = path.basename(fullPath, subExt);
+      const subBaseNameLower = subBaseName.toLowerCase();
+
+      // If single video in directory, match all subtitle files.
+      // Otherwise, match if subtitle starts with or equals the video base name.
+      const isMatch = videoCountInDir <= 1 ||
+        subBaseNameLower.startsWith(videoBaseNameLower) ||
+        subBaseNameLower === videoBaseNameLower ||
+        videoBaseNameLower.startsWith(subBaseNameLower);
+
+      if (isMatch) {
+        let lang = 'es';
+        let label = relativeName;
+
+        const nameParts = subBaseNameLower.split(/[._-]/);
+        if (nameParts.includes('es') || nameParts.includes('spa') || nameParts.includes('spanish') || nameParts.includes('espanol')) {
+          lang = 'es';
+          label = 'Español';
+        } else if (nameParts.includes('en') || nameParts.includes('eng') || nameParts.includes('english')) {
+          lang = 'en';
+          label = 'English';
+        } else if (nameParts.includes('fr') || nameParts.includes('fra') || nameParts.includes('french')) {
+          lang = 'fr';
+          label = 'Français';
+        } else if (nameParts.includes('de') || nameParts.includes('ger') || nameParts.includes('german')) {
+          lang = 'de';
+          label = 'Deutsch';
+        } else if (nameParts.includes('it') || nameParts.includes('ita') || nameParts.includes('italian')) {
+          lang = 'it';
+          label = 'Italiano';
+        } else {
+          const suffix = subBaseName.slice(videoBaseName.length).replace(/^[._-]/, '').trim();
+          label = suffix || subBaseName;
+        }
+
+        const subRelDir = path.dirname(relativeName);
+        if (subRelDir && subRelDir !== '.') {
+          label = `${label} (${subRelDir})`;
+        }
+
+        tracks.push({
+          id: `sub-${index++}`,
+          label: label || `Subtítulo ${index + 1}`,
+          language: lang,
+          filePath: fullPath,
+          format: subExt,
+        });
+      }
+    }
+
+    return tracks;
+  }
+
+  public convertSrtToVtt(srtContent: string): string {
+    let vtt = 'WEBVTT\n\n';
+    const content = srtContent.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const converted = content.replace(/(\d{2}:\d{2}:\d{2}),(\d{3})/g, '$1.$2');
+    return vtt + converted;
+  }
+
+  async getSubtitleContent(mediaId: string, trackId: string): Promise<string> {
+    const media = await this.findOne(mediaId);
+    if (!media.subtitles || media.subtitles.length === 0) {
+      throw new NotFoundException(`El vídeo con ID "${mediaId}" no tiene subtítulos registrados.`);
+    }
+
+    const track = media.subtitles.find((t) => t.id === trackId) || media.subtitles[0];
+    if (!fs.existsSync(track.filePath)) {
+      const msg = `El archivo de subtítulo no se encuentra en la ruta "${track.filePath}".`;
+      this.logger.error(msg);
+      this.notifySubtitleError(track.filePath, msg);
+      throw new NotFoundException(msg);
+    }
+
+    try {
+      const fileContent = fs.readFileSync(track.filePath, 'utf-8');
+      if (track.format === '.vtt') {
+        return fileContent;
+      } else {
+        return this.convertSrtToVtt(fileContent);
+      }
+    } catch (err: any) {
+      this.logger.error(`Error leyendo el archivo de subtítulo ${track.filePath}: ${err.message}`);
+      this.notifySubtitleError(track.filePath, err.message);
+      throw err;
+    }
   }
 
   private async processMetadataAndThumbnail(media: MediaFile): Promise<void> {

@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { X, Folder, Plus, Trash2, Eraser } from 'lucide-react';
+import { X, Folder, Plus, Trash2, Eraser, Info } from 'lucide-react';
 import { LibraryFolder } from '../types/media';
 
 interface FolderModalProps {
@@ -50,7 +50,7 @@ export const FolderModal: React.FC<FolderModalProps> = ({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/75 backdrop-blur-md flex items-center justify-center p-4">
-      <div className="glass-panel w-full max-w-lg p-6 rounded-2xl flex flex-col gap-6 shadow-2xl">
+      <div className="glass-panel w-full max-w-lg p-6 rounded-2xl flex flex-col gap-5 shadow-2xl">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
             <Folder className="text-pink-500" size={24} />
@@ -59,6 +59,25 @@ export const FolderModal: React.FC<FolderModalProps> = ({
           <button className="text-gray-400 hover:text-white transition-colors" onClick={onClose} id="btn-close-folder-modal">
             <X size={22} />
           </button>
+        </div>
+
+        {/* Informative Scanning Rules Guide */}
+        <div className="bg-purple-950/40 border border-purple-500/25 rounded-xl p-3.5 flex flex-col gap-2 text-xs">
+          <div className="flex items-center gap-2 font-semibold text-purple-300">
+            <Info size={16} className="text-pink-400 flex-shrink-0" />
+            <span>Reglas de Escaneo e Importación</span>
+          </div>
+          <ul className="space-y-1.5 text-[11px] text-gray-300/90 pl-1 leading-relaxed">
+            <li>
+              <strong className="text-purple-200">Archivos de vídeo:</strong> Se escanean automáticamente formatos como <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.mp4</code>, <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.mkv</code>, <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.avi</code> y <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.mov</code> (incluyendo subcarpetas).
+            </li>
+            <li>
+              <strong className="text-purple-200">Subtítulos compatibles:</strong> Detecta pistas <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.srt</code>, <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.vtt</code>, <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.ass</code> y <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">.sub</code>.
+            </li>
+            <li>
+              <strong className="text-purple-200">Ubicación de subtítulos:</strong> Se buscan en la carpeta del vídeo o dentro de subcarpetas dedicadas (ej: <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">Subs/</code>, <code className="bg-white/10 px-1 py-0.5 rounded text-purple-300">Subtitles/</code>). Si la carpeta contiene una sola película, se asociarán todos los subtítulos encontrados.
+            </li>
+          </ul>
         </div>
 
         <form onSubmit={handleSubmit} className="flex gap-2">

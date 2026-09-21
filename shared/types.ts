@@ -49,6 +49,14 @@ export interface WatchProgress {
   updatedAt?: string | Date;
 }
 
+export interface SubtitleTrack {
+  id: string;
+  label: string;
+  language: string;
+  filePath: string;
+  format: string;
+}
+
 export interface MediaFile {
   id: string;
   title: string;
@@ -62,6 +70,7 @@ export interface MediaFile {
   height?: number;
   thumbnailPath?: string;
   folderPath?: string;
+  subtitles?: SubtitleTrack[];
   createdAt?: string | Date;
   updatedAt?: string | Date;
   progress?: WatchProgress | null;
@@ -74,7 +83,7 @@ export interface LibraryFolder {
   createdAt?: string | Date;
 }
 
-export type MediaEventType = 'SCAN_STARTED' | 'MEDIA_UPDATED' | 'MEDIA_ERROR' | 'SCAN_COMPLETED';
+export type MediaEventType = 'SCAN_STARTED' | 'MEDIA_UPDATED' | 'MEDIA_ERROR' | 'SUBTITLE_ERROR' | 'SCAN_COMPLETED';
 
 export interface MediaEventPayload {
   type: MediaEventType;
